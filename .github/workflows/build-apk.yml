@@ -20,23 +20,35 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          yes | sdkmanager --licenses || true
-
       - name: Extrair projeto
         run: |
-          unzip -o TojiSettings_Projeto_Android_v1.zip -d projeto
+          unzip -o TojiSettings_Projeto_Android_v1.zip -d extraido
+          echo "Estrutura extraida:"
+          find extraido -maxdepth 4 -type f
+
+      - name: Localizar projeto Android
+        run: |
+          SETTINGS=$(find extraido -name settings.gradle -type f | head -n 1)
+          if [ -z "$SETTINGS" ]; then
+            echo "settings.gradle nao encontrado"
+            exit 1
+          fi
+          DIR=$(dirname "$SETTINGS")
+          cp -a "$DIR"/. .
+          test -d app || exit 1
+          echo "Projeto localizado"
+
+      - name: Instalar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
       - name: Compilar APK
-        working-directory: projeto
-        run: |
-          gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --stacktrace
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
           name: TojiSettings-APK
-          path: projeto/app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           
