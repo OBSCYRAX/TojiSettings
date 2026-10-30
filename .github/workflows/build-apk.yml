@@ -1,9 +1,9 @@
 
-name: Gerar APK
+name: Gerar APK V2
 
 on:
   push:
-    branches: [main, principal]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -20,35 +20,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extrair projeto
-        run: |
-          unzip -o TojiSettings_Projeto_Android_v1.zip -d extraido
-          echo "Estrutura extraida:"
-          find extraido -maxdepth 4 -type f
-
-      - name: Localizar projeto Android
-        run: |
-          SETTINGS=$(find extraido -name settings.gradle -type f | head -n 1)
-          if [ -z "$SETTINGS" ]; then
-            echo "settings.gradle nao encontrado"
-            exit 1
-          fi
-          DIR=$(dirname "$SETTINGS")
-          cp -a "$DIR"/. .
-          test -d app || exit 1
-          echo "Projeto localizado"
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Instalar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Compilar APK
+      - name: Compilar APK V2
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Disponibilizar APK
+      - name: Disponibilizar APK V2
         uses: actions/upload-artifact@v4
         with:
-          name: TojiSettings-APK
+          name: TojiSettings-V2-APK
           path: app/build/outputs/apk/debug/app-debug.apk
-          
+          if-no-files-found: error
+  
