@@ -1,33 +1,37 @@
+
 name: Gerar APK
 
 on:
-  workflow_dispatch:
   push:
     branches: [principal, main]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Extrair projeto
-        run: unzip -o TojiSettings_Projeto_Android_v1.zip
+        run: unzip -o TojiSettings_Projeto_Android_v1.zip -d projeto
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      
-      - name: Configurar Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          yes | sdkmanager --licenses || true
+
+      - uses: android-actions/setup-android@v3
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
       - name: Compilar APK
+        working-directory: projeto
         run: gradle :app:assembleDebug --no-daemon
+
       - uses: actions/upload-artifact@v4
         with:
           name: TojiSettings-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: projeto/app/build/outputs/apk/debug/*.apk
+  
