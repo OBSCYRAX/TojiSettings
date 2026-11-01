@@ -2,9 +2,11 @@
 package com.toji.settings;
 
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.IBinder;
@@ -16,7 +18,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -30,7 +31,6 @@ public class FloatingPanelService extends Service {
     private LinearLayout root;
     private LinearLayout panel;
     private TextView bubble;
-
     private EditText widthInput;
     private EditText heightInput;
     private TextView status;
@@ -46,30 +46,24 @@ public class FloatingPanelService extends Service {
                 getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    private GradientDrawable shape(
-            int color, int radius) {
-
+    private GradientDrawable shape(int color, int radius) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(dp(radius));
         return drawable;
     }
 
-    private TextView makeButton(
-            String text, LinearLayout parent) {
-
+    private TextView makeButton(String text, LinearLayout parent) {
         TextView button = new TextView(this);
         button.setText(text);
         button.setTextColor(Color.WHITE);
         button.setTextSize(13);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(
-                dp(10), dp(12), dp(10), dp(12));
+        button.setPadding(dp(10), dp(12), dp(10), dp(12));
         button.setBackground(shape(0xff7435ad, 12));
 
         LinearLayout.LayoutParams lp =
-                new LinearLayout.LayoutParams(
-                        -1, -2);
+                new LinearLayout.LayoutParams(-1, -2);
         lp.topMargin = dp(8);
 
         parent.addView(button, lp);
@@ -78,8 +72,8 @@ public class FloatingPanelService extends Service {
 
     private void toast(String text) {
         handler.post(() ->
-                Toast.makeText(
-                        this, text, Toast.LENGTH_LONG).show());
+                Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+        );
     }
 
     private void setStatus(String text) {
@@ -93,9 +87,8 @@ public class FloatingPanelService extends Service {
     private void hideKeyboard() {
         try {
             InputMethodManager imm =
-                    (InputMethodManager)
-                            getSystemService(
-                                    Context.INPUT_METHOD_SERVICE);
+                    (InputMethodManager) getSystemService(
+                            Context.INPUT_METHOD_SERVICE);
 
             if (imm != null && root != null) {
                 imm.hideSoftInputFromWindow(
@@ -110,7 +103,7 @@ public class FloatingPanelService extends Service {
     }
 
     private void updateWindow() {
-        if (root == null || wm == null) {
+        if (root == null || wm == null || params == null) {
             return;
         }
 
@@ -135,8 +128,7 @@ public class FloatingPanelService extends Service {
                     ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
 
             params.softInputMode =
-                    WindowManager.LayoutParams
-                            .SOFT_INPUT_ADJUST_RESIZE;
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
 
         } else {
             hideKeyboard();
@@ -163,11 +155,9 @@ public class FloatingPanelService extends Service {
         }
 
         busy = true;
-
         setStatus("Executando pelo Shizuku...");
 
         new Thread(() -> {
-
             ResolutionController.Result result;
 
             try {
@@ -178,11 +168,11 @@ public class FloatingPanelService extends Service {
             } catch (Throwable e) {
                 result = new ResolutionController.Result(
                         false,
-                        "Erro: " + e.getMessage());
+                        "Erro: " + e.getMessage()
+                );
             }
 
-            final ResolutionController.Result response =
-                    result;
+            final ResolutionController.Result response = result;
 
             handler.post(() -> {
                 busy = false;
@@ -194,13 +184,11 @@ public class FloatingPanelService extends Service {
                 setStatus(message);
                 toast(message);
             });
-
         }).start();
     }
 
     private void enableDrag(View target) {
-        target.setOnTouchListener(
-                new View.OnTouchListener() {
+        target.setOnTouchListener(new View.OnTouchListener() {
 
             float downX;
             float downY;
@@ -209,8 +197,7 @@ public class FloatingPanelService extends Service {
             boolean moved;
 
             @Override
-            public boolean onTouch(
-                    View v, MotionEvent event) {
+            public boolean onTouch(View v, MotionEvent event) {
 
                 switch (event.getActionMasked()) {
 
@@ -225,11 +212,8 @@ public class FloatingPanelService extends Service {
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
-
-                        float dx =
-                                event.getRawX() - downX;
-                        float dy =
-                                event.getRawY() - downY;
+                        float dx = event.getRawX() - downX;
+                        float dy = event.getRawY() - downY;
 
                         if (Math.abs(dx) > dp(8)
                                 || Math.abs(dy) > dp(8)) {
@@ -245,20 +229,19 @@ public class FloatingPanelService extends Service {
                         return true;
 
                     case MotionEvent.ACTION_UP:
-
                         if (!moved) {
                             setExpanded(!expanded);
                         }
-
                         return true;
 
                     case MotionEvent.ACTION_CANCEL:
                         return true;
-                }
 
-                return false;
+                    default:
+                        return false;
+                }
             }
-        );
+        });
     }
 
     @Override
@@ -275,8 +258,7 @@ public class FloatingPanelService extends Service {
             return START_NOT_STICKY;
         }
 
-        wm = (WindowManager)
-                getSystemService(WINDOW_SERVICE);
+        wm = (WindowManager) getSystemService(WINDOW_SERVICE);
 
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -285,22 +267,20 @@ public class FloatingPanelService extends Service {
         bubble.setText("TOJI");
         bubble.setTextColor(Color.WHITE);
         bubble.setTextSize(13);
-        bubble.setTypeface(
-                null, android.graphics.Typeface.BOLD);
+        bubble.setTypeface(null, Typeface.BOLD);
         bubble.setGravity(Gravity.CENTER);
 
         GradientDrawable bubbleBackground =
                 shape(0xff261a38, 100);
-
-        bubbleBackground.setStroke(
-                dp(2), 0xffb678ff);
+        bubbleBackground.setStroke(dp(2), 0xffb678ff);
 
         bubble.setBackground(bubbleBackground);
 
         root.addView(
                 bubble,
                 new LinearLayout.LayoutParams(
-                        dp(62), dp(62)));
+                        dp(62), dp(62))
+        );
 
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -318,7 +298,6 @@ public class FloatingPanelService extends Service {
         title.setGravity(Gravity.CENTER);
         title.setPadding(
                 dp(8), dp(10), dp(8), dp(12));
-
         panel.addView(title);
 
         TextView note = new TextView(this);
@@ -335,9 +314,9 @@ public class FloatingPanelService extends Service {
         widthInput.setTextColor(Color.WHITE);
         widthInput.setHintTextColor(Color.LTGRAY);
         widthInput.setTextSize(16);
-        widthInput.setSelectAllOnFocus(true);
         widthInput.setInputType(
                 InputType.TYPE_CLASS_NUMBER);
+        widthInput.setSelectAllOnFocus(true);
         panel.addView(widthInput);
 
         heightInput = new EditText(this);
@@ -347,9 +326,9 @@ public class FloatingPanelService extends Service {
         heightInput.setTextColor(Color.WHITE);
         heightInput.setHintTextColor(Color.LTGRAY);
         heightInput.setTextSize(16);
-        heightInput.setSelectAllOnFocus(true);
         heightInput.setInputType(
                 InputType.TYPE_CLASS_NUMBER);
+        heightInput.setSelectAllOnFocus(true);
         panel.addView(heightInput);
 
         TextView apply =
@@ -368,24 +347,19 @@ public class FloatingPanelService extends Service {
                 makeButton("FECHAR PAINEL", panel);
 
         status = new TextView(this);
-        status.setText(
-                "Pronto para aplicar resolução.");
+        status.setText("Pronto para aplicar resolução.");
         status.setTextColor(0xffd7c5e9);
         status.setTextSize(12);
-        status.setPadding(
-                0, dp(12), 0, dp(4));
-
+        status.setPadding(0, dp(12), 0, dp(4));
         panel.addView(status);
 
         apply.setOnClickListener(v -> {
             try {
                 int width = Integer.parseInt(
-                        widthInput.getText()
-                                .toString().trim());
+                        widthInput.getText().toString().trim());
 
                 int height = Integer.parseInt(
-                        heightInput.getText()
-                                .toString().trim());
+                        heightInput.getText().toString().trim());
 
                 if (width < 600 || width > 3000
                         || height < 600 || height > 4000) {
@@ -412,8 +386,7 @@ public class FloatingPanelService extends Service {
                             "com.netease.newspike");
 
             if (launch != null) {
-                launch.addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK);
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
                 try {
                     startActivity(launch);
@@ -438,16 +411,12 @@ public class FloatingPanelService extends Service {
         params = new WindowManager.LayoutParams(
                 dp(62),
                 dp(62),
-                WindowManager.LayoutParams
-                        .TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams
-                        .FLAG_NOT_FOCUSABLE,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
         );
 
-        params.gravity =
-                Gravity.TOP | Gravity.START;
-
+        params.gravity = Gravity.TOP | Gravity.START;
         params.x = dp(20);
         params.y = dp(110);
 
