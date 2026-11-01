@@ -12,7 +12,8 @@ import android.widget.*;
 import android.text.InputType;
 import java.util.*;
 import rikka.shizuku.Shizuku;
-
+import android.provider.Settings;
+import android.net.Uri;
 public class MainActivity extends Activity {
  final int BG=0xff100d18, PANEL=0xff211b2c, PANEL2=0xff292132, PURPLE=0xffa444f4, LIGHT=0xffc782ff, MUTED=0xffaaa4b4, WHITE=0xfff7f3fa;
  final String[] tabs={"Início","Booster","Sensi","Perfil"}, symbols={"⌂","ϟ","☷","♙"};
@@ -43,7 +44,45 @@ public class MainActivity extends Activity {
  boolean shizukuRunning(){try{return Shizuku.pingBinder();}catch(Throwable t){return false;}}
  boolean shizukuAllowed(){try{return shizukuRunning()&&Shizuku.checkSelfPermission()==PackageManager.PERMISSION_GRANTED;}catch(Throwable t){return false;}}
  void requestShizuku(){if(!shizukuRunning()){try{Intent i=getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");if(i!=null){startActivity(i);return;}}catch(Exception ignored){}info("Instale e inicie o aplicativo Shizuku. Depois volte ao Toji Settings.");return;}if(shizukuAllowed()){info("Shizuku já está autorizado para o Toji Settings.");return;}try{Shizuku.requestPermission(1001);info("Responda à solicitação de autorização do Shizuku e depois toque em atualizar.");}catch(Throwable t){info("Não foi possível solicitar a permissão: "+t.getMessage());}}
- void booster(){heading("Game Booster","Veja o status do Shizuku e prepare seu dispositivo.");boolean active=shizukuRunning(), allowed=shizukuAllowed();LinearLayout c=card("♢  "+(allowed?"SHIZUKU CONECTADO":active?"SHIZUKU SEM PERMISSÃO":"SHIZUKU DESLIGADO"),allowed?"Autorização concedida ao Toji Settings.":active?"Serviço ativo. Autorize este aplicativo.":"Inicie o Shizuku para usar recursos autorizados.");btn(c,allowed?"VERIFICAR CONEXÃO":active?"AUTORIZAR":"CONECTAR",()->{if(allowed)show("Booster");else requestShizuku();});LinearLayout how=card("ⓘ  Como conectar","1. Abra o Shizuku.\n2. Inicie via depuração sem fio ou outro método suportado.\n3. Autorize o Toji Settings.\n4. Volte e toque em atualizar.");LinearLayout stat=card("▣  APPS EM EXECUÇÃO","O Android limita a visualização de processos de outros apps. O Toji não apresenta contagens inventadas.");btn(stat,"⟳  ATUALIZAR STATUS",()->show("Booster"));LinearLayout dev=card("◈  SEU DISPOSITIVO",Build.MANUFACTURER+" "+Build.MODEL+"  •  Android "+Build.VERSION.RELEASE);LinearLayout manage=card("♧  GERENCIAR SEGUNDO PLANO","O Shizuku autorizado não garante, sozinho, permissão para encerrar qualquer aplicativo. Use as configurações do Android para controlar apps.");btn(manage,"ABRIR GERENCIAMENTO DE APPS",()->{try{startActivity(new Intent("android.settings.APPLICATION_SETTINGS"));}catch(Exception e){info("Não foi possível abrir as configurações.");}});add(content,text("O Toji não monitora processos continuamente nem promete aumento de FPS.",12,MUTED,false),19);}
+ void booster(){heading("Game Booster","Veja o status do Shizuku e prepare seu dispositivo.");boolean active=shizukuRunning(), allowed=shizukuAllowed();LinearLayout c=card("♢  "+(allowed?"SHIZUKU CONECTADO":active?"SHIZUKU SEM PERMISSÃO":"SHIZUKU DESLIGADO"),allowed?"Autorização concedida ao Toji Settings.":active?"Serviço ativo. Autorize este aplicativo.":"Inicie o Shizuku para usar recursos autorizados.");btn(c,allowed?"VERIFICAR CONEXÃO":active?"AUTORIZAR":"CONECTAR",()->{if(allowed)show("Booster");else requestShizuku();});LinearLayout how=card("ⓘ  Como conectar","1. Abra o Shizuku.\n2. Inicie via depuração sem fio ou outro método suportado.\n3. Autorize o Toji Settings.\n4. Volte e toque em atualizar.");LinearLayout stat=card("▣  APPS EM EXECUÇÃO","O Android limita a visualização de processos de outros apps. O Toji não apresenta contagens inventadas.");btn(stat,"⟳  ATUALIZAR STATUS",()->show("Booster"));LinearLayout dev=card("◈  SEU DISPOSITIVO",Build.MANUFACTURER+" "+Build.MODEL+"  •  Android "+Build.VERSION.RELEASE);LinearLayout manage=card("♧  GERENCIAR SEGUNDO PLANO","O Shizuku autorizado não garante, sozinho, permissão para encerrar qualquer aplicativo. Use as configurações do Android para controlar apps.");btn(manage,"ABRIR GERENCIAMENTO DE APPS",()->{try{startActivity(new Intent("android.settings.APPLICATION_SETTINGS"));}catch(Exception e){info("Não foi possível abrir as configurações.");}});add(content,text("O Toji não monitora processos continuamente nem promete aumento de FPS.",12,MUTED,false),19);stretch();}
+
+void stretch() {
+    LinearLayout c = card(
+        "▣ TELA ESTICADA • BLOOD STRIKE",
+        "Configure a resolução do Android usando Shizuku."
+    );
+
+    btn(c, "ABRIR PAINEL FLUTUANTE", () -> {
+        if (!Settings.canDrawOverlays(this)) {
+            try {
+                startActivity(new Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())
+                ));
+            } catch (Exception e) {
+                info("Autorize a sobreposição nas configurações.");
+            }
+            return;
+        }
+
+        try {
+            startService(new Intent(this, FloatingPanelService.class));
+            info("Painel flutuante iniciado!");
+        } catch (Exception e) {
+            info("Erro ao iniciar painel: " + e.getMessage());
+        }
+    });
+
+    btn(c, "RESTAURAR RESOLUÇÃO", () -> {
+        new Thread(() -> {
+            ResolutionController.Result r =
+                ResolutionController.restore(this);
+
+            runOnUiThread(() -> info(r.message));
+        }).start();
+    });
+}
+ 
  void sensi(){heading("Sensibilidade","Crie seu perfil e ajuste os valores de referência.");LinearLayout p=card("🎯  PERFIS DE MIRA","Perfil atual: "+prefs.getString("profile","Equilibrado"));btn(p,"⚡ RUSH",()->preset("Rush",new int[]{120,110,100,90,65,100}));btn(p,"◎ EQUILIBRADO",()->preset("Equilibrado",defaults));btn(p,"⊕ PRECISÃO",()->preset("Precisão",new int[]{80,75,70,60,40,65}));for(int i=0;i<labels.length;i++){final int index=i;LinearLayout c=card(labels[i],null);int val=prefs.getInt("v"+i,defaults[i]);TextView number=text("Valor: "+val,14,LIGHT,false);add(c,number,10);SeekBar seek=new SeekBar(this);seek.setMax(200);seek.setProgress(val);add(c,seek,5);seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar s,int v,boolean from){number.setText("Valor: "+v);if(from)prefs.edit().putInt("v"+index,v).putString("profile","Personalizado").apply();}public void onStartTrackingTouch(SeekBar s){}public void onStopTrackingTouch(SeekBar s){}});}btn(content,"SALVAR CONFIGURAÇÕES",()->info("Valores salvos neste celular. Aplique manualmente nas configurações do jogo."));add(content,text("Os ajustes são referências locais e não modificam os arquivos dos jogos.",12,MUTED,false),15);}
  void preset(String name,int[] values){android.content.SharedPreferences.Editor edit=prefs.edit().putString("profile",name);for(int i=0;i<values.length;i++)edit.putInt("v"+i,values[i]);edit.apply();show("Sensi");}
  void profile(){heading("Meu Perfil",null);LinearLayout c=card("👤  Jogador","Seu perfil fica salvo somente neste dispositivo.");EditText input=new EditText(this);input.setSingleLine(true);input.setTextColor(WHITE);input.setHintTextColor(MUTED);input.setText(prefs.getString("nickname","Jogador"));input.setHint("Apelido");input.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);add(c,input,15);btn(c,"SALVAR APELIDO",()->{String n=input.getText().toString().trim();if(n.isEmpty()){info("Digite um apelido.");return;}prefs.edit().putString("nickname",n).apply();info("Apelido salvo!");});LinearLayout settings=card("⚙  Configurações","Versão 3.0 • Reconstrução do Toji Settings");btn(settings,"RESTAURAR SENSIBILIDADE",()->new AlertDialog.Builder(this).setTitle("Restaurar sensibilidade?").setMessage("Isso substituirá os valores salvos pelos padrões.").setNegativeButton("CANCELAR",null).setPositiveButton("RESTAURAR",(d,w)->{android.content.SharedPreferences.Editor e=prefs.edit().putString("profile","Equilibrado");for(int i=0;i<defaults.length;i++)e.putInt("v"+i,defaults[i]);e.apply();info("Sensibilidade restaurada.");}).show());LinearLayout about=card("ⓘ  Sobre","Toji Settings V3. As sensibilidades são recomendações locais. O Booster exibe informações disponíveis e orienta o uso do Shizuku sem simular ações privilegiadas.");}
