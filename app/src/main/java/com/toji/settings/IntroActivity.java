@@ -33,7 +33,7 @@ public class IntroActivity extends Activity {
         video.setVideoURI(Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.toji_intro_original));
         video.setOnPreparedListener(mp -> {
             mp.setLooping(true);
-            mp.setVolume(0f, 0f); // áudio desligado para não surpreender na abertura
+            mp.setVolume(1f, 1f); // áudio desligado para não surpreender na abertura
             video.start();
         });
         video.setOnErrorListener((mp, what, extra) -> {
