@@ -2,8 +2,9 @@
 package com.toji.settings;
 
 import android.app.Service;
-import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
@@ -21,100 +22,100 @@ import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 public class FloatingPanelService extends Service {
+    private static final int PURPLE = 0xFF7545ED;
+    private static final int DARK = 0xFF111827;
+    private static final int FIELD = 0xFF273244;
+    private static final int WHITE = Color.WHITE;
+    private static final int TEST_MS = 15000;
 
     private WindowManager wm;
     private WindowManager.LayoutParams params;
+    private LinearLayout root, header, content;
+    private ScrollView panel;
+    private TextView title, status, sliderLabel;
+    private EditText widthField, heightField;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private Runnable timer;
+    private boolean expanded, testing, busy, destroyed;
+    private int bubbleX, bubbleY;
 
-    private LinearLayout root;
-    private LinearLayout panel;
-    private TextView title;
-    private TextView status;
-    private EditText widthInput;
-    private EditText heightInput;
-
-    private final Handler handler =
-            new Handler(Looper.getMainLooper());
-
-    private Runnable autoRestore;
-
-    private boolean expanded = false;
-    private boolean pending = false;
-    private boolean busy = false;
-
-    private static final int TEST_TIME = 15000;
-
-    private int dp(int value) {
-        return (int) (value *
-            getResources().getDisplayMetrics().density + 0.5f);
+    private int dp(int n) {
+        return Math.round(n * getResources().getDisplayMetrics().density);
     }
 
-    private GradientDrawable bg(int color, int radius) {
+    private GradientDrawable shape(int color, int radius) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
         d.setCornerRadius(dp(radius));
         return d;
     }
 
-    private TextView text(String value, int size) {
+    private TextView text(String value, int size, int color) {
         TextView t = new TextView(this);
         t.setText(value);
-        t.setTextColor(Color.WHITE);
         t.setTextSize(size);
+        t.setTextColor(color);
+        t.setGravity(Gravity.CENTER_VERTICAL);
         return t;
     }
 
-    private TextView button(String label, Runnable action) {
-        TextView b = text(label, 14);
+    private void button(String value, int color, Runnable action) {
+        TextView b = text(value, 13, WHITE);
         b.setGravity(Gravity.CENTER);
-        b.setPadding(dp(12), dp(13), dp(12), dp(13));
-        b.setBackground(bg(0xFF263244, 12));
+        b.setBackground(shape(color, 11));
+        b.setPadding(dp(7), dp(11), dp(7), dp(11));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(7);
+        content.addView(b, lp);
         b.setOnClickListener(v -> action.run());
+    }
 
-        LinearLayout.LayoutParams lp =
-            new LinearLayout.LayoutParams(
-                -1, -2
-            );
-        lp.bottomMargin = dp(8);
-        panel.addView(b, lp);
-
-        return b;
+    private EditText number(String value) {
+        EditText e = new EditText(this);
+        e.setText(value);
+        e.setSingleLine(true);
+        e.setTextColor(WHITE);
+        e.setTextSize(15);
+        e.setGravity(Gravity.CENTER);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER);
+        e.setBackground(shape(FIELD, 10));
+        e.setSelectAllOnFocus(true);
+        e.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                setFocusable(true);
+            }
+            return false;
+        });
+        return e;
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
-
         if (!Settings.canDrawOverlays(this)) {
             stopSelf();
             return;
         }
-
-        wm = (WindowManager)
-                getSystemService(WINDOW_SERVICE);
-
+        wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         int type = Build.VERSION.SDK_INT >= 26
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
-
         params = new WindowManager.LayoutParams(
-                -2,
-                -2,
-                type,
+                -2, -2, type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                    | WindowManager.LayoutParams.FLAG_SPLIT_TOUCH,
-                PixelFormat.TRANSLUCENT
-        );
-
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
-        params.x = dp(12);
-        params.y = dp(180);
-
-        createInterface();
-
+        params.x = dp(10);
+        params.y = dp(115);
+        bubbleX = params.x;
+        bubbleY = params.y;
+        build();
         try {
             wm.addView(root, params);
         } catch (Exception e) {
@@ -122,419 +123,325 @@ public class FloatingPanelService extends Service {
         }
     }
 
-    private void createInterface() {
-
+    private void build() {
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-
-        LinearLayout header = new LinearLayout(this);
+        header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setBackground(bg(0xFF141826, 22));
-        header.setPadding(dp(4), dp(4), dp(10), dp(4));
+        header.setPadding(dp(3), dp(3), dp(9), dp(3));
+        header.setBackground(shape(DARK, 22));
 
-        TextView bubble = text("T", 20);
+        TextView bubble = text("T", 14, WHITE);
         bubble.setGravity(Gravity.CENTER);
         bubble.setTypeface(null, 1);
-        bubble.setBackground(bg(0xFF7545ED, 40));
+        bubble.setBackground(shape(PURPLE, 30));
+        header.addView(bubble, new LinearLayout.LayoutParams(dp(34), dp(34)));
 
-        header.addView(bubble,
-            new LinearLayout.LayoutParams(dp(48), dp(48)));
-
-        title = text("  TOJI  |  STRETCH", 14);
+        // Puxador roxo no tema do Toji.
+        TextView grip = text("  ━━", 14, PURPLE);
+        header.addView(grip);
+        title = text("  TOJI | STRETCH", 12, WHITE);
         title.setTypeface(null, 1);
         title.setVisibility(View.GONE);
         header.addView(title);
-
         root.addView(header);
-        configureDrag(header);
+        drag(header);
 
-        panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(14), dp(14), dp(14), dp(10));
-        panel.setBackground(bg(0xFF111827, 16));
+        panel = new ScrollView(this);
+        panel.setFillViewport(false);
+        panel.setVerticalScrollBarEnabled(true);
+        panel.setBackground(shape(DARK, 15));
         panel.setVisibility(View.GONE);
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(12), dp(12), dp(12), dp(10));
+        panel.addView(content);
+        root.addView(panel);
 
-        root.addView(panel,
-            new LinearLayout.LayoutParams(dp(290), -2));
-
-        TextView heading = text("RESOLUCAO", 17);
+        TextView heading = text("RESOLUÇÃO", 16, WHITE);
         heading.setTypeface(null, 1);
-        heading.setPadding(0, 0, 0, dp(12));
-        panel.addView(heading);
+        heading.setPadding(0, 0, 0, dp(10));
+        content.addView(heading);
 
-        LinearLayout inputs = new LinearLayout(this);
-        inputs.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.HORIZONTAL);
+        widthField = number("1080");
+        heightField = number("1920");
+        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        wlp.rightMargin = dp(6);
+        fields.addView(widthField, wlp);
+        fields.addView(heightField, new LinearLayout.LayoutParams(0, dp(44), 1));
+        content.addView(fields);
 
-        widthInput = makeInput("1080");
-        heightInput = makeInput("2400");
+        TextView hint = text("LARGURA                          ALTURA", 10, 0xFFADB5C6);
+        hint.setPadding(0, dp(3), 0, dp(10));
+        content.addView(hint);
 
-        LinearLayout.LayoutParams ip =
-            new LinearLayout.LayoutParams(0, dp(50), 1);
-        ip.rightMargin = dp(6);
-        inputs.addView(widthInput, ip);
+        sliderLabel = text("ALTURA • 1920", 12, 0xFFB9A1FF);
+        content.addView(sliderLabel);
+        SeekBar slider = new SeekBar(this);
+        slider.setMax(80);
+        slider.setProgress(16);
+        slider.setProgressTintList(ColorStateList.valueOf(PURPLE));
+        slider.setThumbTintList(ColorStateList.valueOf(PURPLE));
+        content.addView(slider);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int h = 1600 + progress * 20;
+                sliderLabel.setText("ALTURA • " + h);
+                if (fromUser) heightField.setText(String.valueOf(h));
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
 
-        inputs.addView(heightInput,
-            new LinearLayout.LayoutParams(0, dp(50), 1));
-
-        panel.addView(inputs);
-
-        TextView hint = text(
-            "Largura                 Altura", 12
-        );
-        hint.setTextColor(0xFF9CA3AF);
-        hint.setPadding(0, dp(4), 0, dp(12));
-        panel.addView(hint);
-
-        TextView preset = button(
-            "TESTAR 1080 x 2400",
-            () -> applyResolution(1080, 2400)
-        );
-        preset.setBackground(bg(0xFF7545ED, 12));
-
-        button("TESTAR PERSONALIZADA", () -> {
+        button("TESTAR RESOLUÇÃO", PURPLE, () -> {
             try {
-                int w = Integer.parseInt(
-                    widthInput.getText().toString().trim()
-                );
-                int h = Integer.parseInt(
-                    heightInput.getText().toString().trim()
-                );
-
-                applyResolution(w, h);
-
-            } catch (NumberFormatException e) {
-                updateStatus("Digite largura e altura validas.");
+                int w = Integer.parseInt(widthField.getText().toString().trim());
+                int h = Integer.parseInt(heightField.getText().toString().trim());
+                apply(w, h);
+            } catch (NumberFormatException ex) {
+                message("Digite largura e altura válidas.");
             }
         });
 
-        button("MANTER RESOLUCAO", () -> {
-            if (busy || !pending) {
-                updateStatus("Nenhum teste pendente.");
+        button("MANTER RESOLUÇÃO", FIELD, () -> {
+            if (busy || !testing) {
+                message("Nenhum teste pendente.");
                 return;
             }
-
-            pending = false;
+            testing = false;
             cancelTimer();
-            updateStatus("Resolucao mantida. Restaure quando quiser.");
+            message("Resolução mantida. Restaure quando quiser.");
         });
 
-        button("RESTAURAR TELA", () -> {
-            restoreResolution(false);
-        });
-
-        button("FECHAR PAINEL", () -> {
-            if (busy) {
-                updateStatus("Aguarde o comando terminar.");
-                return;
-            }
-
-            if (pending) {
-                restoreResolution(true);
-            } else {
-                stopSelf();
-            }
-        });
-
-        status = text("Pronto para testar.", 12);
-        status.setTextColor(0xFFA5B4FC);
-        status.setPadding(0, dp(8), 0, dp(6));
-        panel.addView(status);
+        button("RESTAURAR TELA", FIELD, () -> restore(false));
+        button("ABRIR BLOOD STRIKE", FIELD, this::openBlood);
+        button("MINIMIZAR PARA BOLINHA", FIELD, () -> expand(false));
+        button("FECHAR TUDO", 0xFF433050, this::closeAll);
+        status = text("Pronto para testar.", 11, 0xFFB9A1FF);
+        status.setPadding(0, dp(6), 0, 0);
+        content.addView(status);
     }
 
-    private EditText makeInput(String initial) {
-        EditText e = new EditText(this);
-
-        e.setSingleLine(true);
-        e.setText(initial);
-        e.setTextColor(Color.WHITE);
-        e.setTextSize(15);
-        e.setSelectAllOnFocus(true);
-        e.setGravity(Gravity.CENTER);
-        e.setInputType(InputType.TYPE_CLASS_NUMBER);
-        e.setBackground(bg(0xFF263244, 10));
-
-        e.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                setOverlayFocusable(true);
-                e.requestFocus();
-
-                e.postDelayed(() -> {
-                    InputMethodManager imm =
-                        (InputMethodManager)
-                        getSystemService(INPUT_METHOD_SERVICE);
-
-                    if (imm != null) {
-                        imm.showSoftInput(
-                            e,
-                            InputMethodManager.SHOW_IMPLICIT
-                        );
-                    }
-                }, 150);
-            }
-            return false;
-        });
-
-        return e;
-    }
-
-    private void setOverlayFocusable(boolean focusable) {
-        if (params == null || wm == null || root == null) {
-            return;
-        }
-
-        if (focusable) {
-            params.flags &=
-                ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-        } else {
-            params.flags |=
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-        }
-
-        params.flags |=
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
-
-        try {
-            wm.updateViewLayout(root, params);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void hideKeyboard() {
-        if (root == null) return;
-
-        InputMethodManager imm =
-            (InputMethodManager)
-            getSystemService(INPUT_METHOD_SERVICE);
-
-        if (imm != null) {
-            imm.hideSoftInputFromWindow(
-                root.getWindowToken(), 0
-            );
-        }
-
-        root.clearFocus();
-        setOverlayFocusable(false);
-    }
-
-    private void configureDrag(View handle) {
-
-        final int slop =
-            ViewConfiguration.get(this).getScaledTouchSlop();
-
+    private void drag(View handle) {
+        final int slop = ViewConfiguration.get(this).getScaledTouchSlop();
         handle.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY;
+            int startX, startY;
+            boolean moved;
 
-            private float downX;
-            private float downY;
-            private int initialX;
-            private int initialY;
-            private boolean moved;
-
-            @Override
-            public boolean onTouch(View v, MotionEvent e) {
+            @Override public boolean onTouch(View view, MotionEvent e) {
                 switch (e.getActionMasked()) {
-
                     case MotionEvent.ACTION_DOWN:
                         downX = e.getRawX();
                         downY = e.getRawY();
-                        initialX = params.x;
-                        initialY = params.y;
+                        startX = params.x;
+                        startY = params.y;
                         moved = false;
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
-                        float dx = e.getRawX() - downX;
-                        float dy = e.getRawY() - downY;
-
-                        if (Math.abs(dx) > slop ||
-                            Math.abs(dy) > slop) {
-                            moved = true;
-                        }
-
+                        int dx = Math.round(e.getRawX() - downX);
+                        int dy = Math.round(e.getRawY() - downY);
+                        if (Math.abs(dx) > slop || Math.abs(dy) > slop) moved = true;
                         if (moved) {
-                            params.x = initialX + (int) dx;
-                            params.y = initialY + (int) dy;
-
-                            try {
-                                wm.updateViewLayout(root, params);
-                            } catch (Exception ignored) {
+                            params.x = Math.max(0, startX + dx);
+                            params.y = Math.max(0, startY + dy);
+                            if (!expanded) {
+                                bubbleX = params.x;
+                                bubbleY = params.y;
                             }
+                            updateWindow();
                         }
                         return true;
 
                     case MotionEvent.ACTION_UP:
-                        if (!moved) {
-                            togglePanel();
-                        }
+                        if (!moved) expand(!expanded);
                         return true;
 
                     case MotionEvent.ACTION_CANCEL:
                         return true;
                 }
-
                 return false;
             }
         });
     }
 
-    private void togglePanel() {
-        expanded = !expanded;
-
-        hideKeyboard();
-
-        panel.setVisibility(
-            expanded ? View.VISIBLE : View.GONE
-        );
-
-        title.setVisibility(
-            expanded ? View.VISIBLE : View.GONE
-        );
-
-        try {
-            wm.updateViewLayout(root, params);
-        } catch (Exception ignored) {
+    private void setFocusable(boolean enabled) {
+        if (params == null) return;
+        if (enabled) {
+            params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        } else {
+            params.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         }
+        params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
+        updateWindow();
     }
 
-    private void updateStatus(String message) {
-        if (status != null) {
-            status.setText(message);
+    private void hideKeyboard() {
+        if (root == null) return;
+        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(root.getWindowToken(), 0);
+        root.clearFocus();
+        setFocusable(false);
+    }
+
+    private void expand(boolean show) {
+        if (root == null || panel == null) return;
+        hideKeyboard();
+        if (show && !expanded) {
+            bubbleX = params.x;
+            bubbleY = params.y;
         }
+        expanded = show;
+        title.setVisibility(show ? View.VISIBLE : View.GONE);
+        panel.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            int screenH = getResources().getDisplayMetrics().heightPixels;
+            int width = Math.max(dp(170), Math.min(dp(285), screenW - dp(20)));
+            int height = Math.max(dp(95), Math.min(dp(340), screenH - dp(85)));
+            panel.setLayoutParams(new LinearLayout.LayoutParams(width, height));
+            header.setLayoutParams(new LinearLayout.LayoutParams(width, -2));
+            params.x = Math.max(0, Math.min(params.x, screenW - width - dp(4)));
+            params.y = dp(5);
+        } else {
+            header.setLayoutParams(new LinearLayout.LayoutParams(-2, -2));
+            params.x = bubbleX;
+            params.y = bubbleY;
+        }
+        updateWindow();
+    }
+
+    private void updateWindow() {
+        if (wm == null || root == null || root.getWindowToken() == null) return;
+        try { wm.updateViewLayout(root, params); } catch (Exception ignored) { }
+    }
+
+    private void message(String value) {
+        if (status != null) status.setText(value);
     }
 
     private void cancelTimer() {
-        if (autoRestore != null) {
-            handler.removeCallbacks(autoRestore);
-            autoRestore = null;
-        }
+        if (timer != null) main.removeCallbacks(timer);
+        timer = null;
     }
 
-    private void applyResolution(int w, int h) {
-
-        if (busy) {
-            updateStatus("Comando em andamento.");
+    private void apply(int width, int height) {
+        if (busy || testing) {
+            message("Confirme ou restaure o teste anterior.");
             return;
         }
-
-        if (pending) {
-            updateStatus("Confirme ou restaure o teste anterior.");
+        if (width < 600 || width > 3000 || height < 600 || height > 4000) {
+            message("Resolução fora dos limites.");
             return;
         }
-
-        if (w < 600 || w > 3000 ||
-            h < 600 || h > 4000) {
-            updateStatus("Resolucao fora dos limites.");
-            return;
-        }
-
         hideKeyboard();
-
         busy = true;
-        updateStatus("Aplicando via Shizuku...");
-
+        message("Aplicando via Shizuku...");
         new Thread(() -> {
-
-            ResolutionController.Result result =
-                ResolutionController.apply(
-                    getApplicationContext(), w, h
-                );
-
-            handler.post(() -> {
+            ResolutionController.Result result = ResolutionController.apply(
+                    getApplicationContext(), width, height);
+            if (destroyed) {
+                if (result.ok) ResolutionController.restore(getApplicationContext());
+                return;
+            }
+            main.post(() -> {
+                if (destroyed) return;
                 busy = false;
-
                 if (!result.ok) {
-                    updateStatus(result.message);
+                    message(result.message);
                     return;
                 }
-
-                pending = true;
-
-                updateStatus(
-                    "Teste ativo por 15 segundos. " +
-                    "Toque MANTER para confirmar."
-                );
-
+                testing = true;
+                message("Teste ativo por 15 segundos. Toque MANTER para confirmar.");
                 cancelTimer();
-
-                autoRestore = () -> {
-                    if (pending) {
-                        restoreResolution(false);
-                    }
-                };
-
-                handler.postDelayed(autoRestore, TEST_TIME);
+                timer = () -> { if (testing && !busy) restore(false); };
+                main.postDelayed(timer, TEST_MS);
             });
-
         }, "Toji-Apply").start();
     }
 
-    private void restoreResolution(boolean closeAfter) {
-
+    private void restore(boolean closeAfter) {
         if (busy) {
-            updateStatus("Aguarde o comando terminar.");
+            message("Aguarde o comando terminar.");
             return;
         }
-
         busy = true;
-        pending = false;
-
+        testing = false;
         cancelTimer();
         hideKeyboard();
-
-        updateStatus("Restaurando resolucao...");
-
+        message("Restaurando resolução...");
         new Thread(() -> {
-
-            ResolutionController.Result result =
-                ResolutionController.restore(
-                    getApplicationContext()
-                );
-
-            handler.post(() -> {
+            ResolutionController.Result result = ResolutionController.restore(getApplicationContext());
+            main.post(() -> {
+                if (destroyed) return;
                 busy = false;
-                updateStatus(result.message);
-
-                if (closeAfter && result.ok) {
-                    stopSelf();
-                }
+                message(result.message);
+                if (closeAfter && result.ok) stopSelf();
             });
-
         }, "Toji-Restore").start();
     }
 
-    @Override
-    public int onStartCommand(
-        Intent intent, int flags, int startId
-    ) {
+    private void closeAll() {
+        if (busy) {
+            message("Aguarde o comando terminar.");
+            return;
+        }
+        boolean active = getSharedPreferences(
+                ResolutionController.PREF, MODE_PRIVATE).getBoolean("active", false);
+        if (active) {
+            restore(true);
+        } else {
+            testing = false;
+            cancelTimer();
+            stopSelf();
+        }
+    }
+
+    private void openBlood() {
+        try {
+            Intent intent = getPackageManager().getLaunchIntentForPackage(
+                    "com.netease.newspike");
+            if (intent == null) {
+                message("Blood Strike não encontrado.");
+                return;
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            expand(false);
+            startActivity(intent);
+        } catch (Exception e) {
+            message("Não foi possível abrir Blood Strike.");
+        }
+    }
+
+    @Override public void onConfigurationChanged(Configuration config) {
+        super.onConfigurationChanged(config);
+        if (expanded) root.post(() -> expand(true));
+    }
+
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
         return START_NOT_STICKY;
     }
 
-    @Override
-    public IBinder onBind(Intent intent) {
+    @Override public IBinder onBind(Intent intent) {
         return null;
     }
 
-    @Override
-    public void onDestroy() {
-        boolean needsRestore = pending;
-
-        pending = false;
+    @Override public void onDestroy() {
+        boolean needsRestore = testing;
+        destroyed = true;
+        testing = false;
         cancelTimer();
-
         if (needsRestore) {
-            new Thread(() ->
-                ResolutionController.restore(
-                    getApplicationContext()
-                ), "Toji-Exit-Restore").start();
+            new Thread(() -> ResolutionController.restore(getApplicationContext()),
+                    "Toji-Restore-On-Exit").start();
         }
-
         if (wm != null && root != null) {
-            try {
-                wm.removeView(root);
-            } catch (Exception ignored) {
-            }
+            try { wm.removeView(root); } catch (Exception ignored) { }
         }
-
         super.onDestroy();
     }
 }
