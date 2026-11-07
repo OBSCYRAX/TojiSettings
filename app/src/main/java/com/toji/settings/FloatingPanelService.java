@@ -3,8 +3,8 @@ package com.toji.settings;
 
 import android.app.Service;
 import android.content.Intent;
-import android.content.res.ColorStateList;
 import android.content.res.Configuration;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
@@ -28,99 +28,113 @@ import android.widget.TextView;
 
 public class FloatingPanelService extends Service {
 
-    private WindowManager wm;
-    private WindowManager.LayoutParams params;
-    private LinearLayout root, header, controls;
-    private ScrollView scroll;
-    private TextView headerText, status, barText;
-    private EditText inputW, inputH;
-    private SeekBar stretchBar;
-
-    private final Handler handler =
-        new Handler(Looper.getMainLooper());
-
-    private Runnable timer;
-    private boolean expanded = false;
-    private boolean busy = false;
-    private boolean testPending = false;
-
-    private int savedX, savedY;
-    private int panelWidth;
-
+    private static final int PURPLE = 0xFF7844ED;
+    private static final int DARK = 0xFF111827;
+    private static final int BUTTON = 0xFF273347;
     private static final int TEST_MS = 15000;
 
-    private int dp(int n) {
-        return (int) (
-            n * getResources().getDisplayMetrics().density
-            + 0.5f
+    private WindowManager wm;
+    private WindowManager.LayoutParams params;
+    private LinearLayout root, header, content;
+    private ScrollView scroll;
+    private TextView name, info, barInfo;
+    private EditText widthInput, heightInput;
+    private SeekBar heightBar;
+
+    private final Handler main =
+        new Handler(Looper.getMainLooper());
+
+    private Runnable restoreTimer;
+    private boolean expanded = false;
+    private boolean busy = false;
+    private boolean testing = false;
+    private boolean destroyed = false;
+
+    private int bubbleX, bubbleY;
+
+    private int dp(int value) {
+        return Math.round(
+            value * getResources()
+                .getDisplayMetrics().density
         );
     }
 
-    private GradientDrawable background(
+    private GradientDrawable rounded(
         int color, int radius
     ) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(color);
-        d.setCornerRadius(dp(radius));
-        return d;
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(dp(radius));
+        return bg;
     }
 
-    private TextView label(
-        String s, int size, int color
+    private TextView text(
+        String value, int size, int color
     ) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(size);
-        t.setTextColor(color);
-        t.setGravity(Gravity.CENTER_VERTICAL);
-        return t;
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(size);
+        view.setTextColor(color);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        return view;
     }
 
-    private TextView button(
-        String text, int color, Runnable click
+    private void addButton(
+        String title, int color, Runnable click
     ) {
-        TextView b = label(text, 13, Color.WHITE);
-        b.setGravity(Gravity.CENTER);
-        b.setBackground(background(color, 11));
-        b.setPadding(
+        TextView btn = text(title, 13, Color.WHITE);
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(
             dp(8), dp(11), dp(8), dp(11)
         );
+        btn.setBackground(rounded(color, 12));
 
         LinearLayout.LayoutParams lp =
             new LinearLayout.LayoutParams(-1, -2);
 
         lp.bottomMargin = dp(7);
-        controls.addView(b, lp);
-
-        b.setOnClickListener(v -> click.run());
-        return b;
+        content.addView(btn, lp);
+        btn.setOnClickListener(v -> click.run());
     }
 
-    private EditText number(String value) {
-        EditText e = new EditText(this);
+    private EditText numberField(String defaultValue) {
+        EditText field = new EditText(this);
+        field.setText(defaultValue);
+        field.setSingleLine(true);
+        field.setSelectAllOnFocus(true);
+        field.setInputType(InputType.TYPE_CLASS_NUMBER);
+        field.setTextColor(Color.WHITE);
+        field.setTextSize(15);
+        field.setGravity(Gravity.CENTER);
+        field.setBackground(rounded(BUTTON, 10));
 
-        e.setSingleLine(true);
-        e.setText(value);
-        e.setSelectAllOnFocus(true);
-        e.setTextColor(Color.WHITE);
-        e.setTextSize(15);
-        e.setGravity(Gravity.CENTER);
-        e.setInputType(InputType.TYPE_CLASS_NUMBER);
-        e.setBackground(
-            background(0xFF273347, 11)
-        );
-
-        e.setOnTouchListener((v, event) -> {
+        field.setOnTouchListener((v, event) -> {
             if (
                 event.getActionMasked()
                 == MotionEvent.ACTION_DOWN
             ) {
-                setFocusable(true);
+                setWindowFocusable(true);
             }
             return false;
         });
 
-        return e;
+        field.setOnClickListener(v -> {
+            setWindowFocusable(true);
+            field.requestFocus();
+
+            InputMethodManager imm =
+                (InputMethodManager)
+                getSystemService(INPUT_METHOD_SERVICE);
+
+            if (imm != null) {
+                imm.showSoftInput(
+                    field,
+                    InputMethodManager.SHOW_IMPLICIT
+                );
+            }
+        });
+
+        return field;
     }
 
     @Override
@@ -140,8 +154,8 @@ public class FloatingPanelService extends Service {
             : WindowManager.LayoutParams.TYPE_PHONE;
 
         params = new WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            -2,
+            -2,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -150,12 +164,15 @@ public class FloatingPanelService extends Service {
 
         params.gravity = Gravity.TOP | Gravity.START;
         params.x = dp(12);
-        params.y = dp(110);
+        params.y = dp(120);
 
-        savedX = params.x;
-        savedY = params.y;
+        bubbleX = params.x;
+        bubbleY = params.y;
 
-        buildPanel();
+        params.softInputMode =
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
+
+        buildInterface();
 
         try {
             wm.addView(root, params);
@@ -164,17 +181,7 @@ public class FloatingPanelService extends Service {
         }
     }
 
-    private void buildPanel() {
-        panelWidth = Math.min(
-            dp(280),
-            Math.max(
-                dp(210),
-                getResources()
-                    .getDisplayMetrics().widthPixels
-                    - dp(28)
-            )
-        );
-
+    private void buildInterface() {
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
 
@@ -182,323 +189,330 @@ public class FloatingPanelService extends Service {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(
-            dp(4), dp(4), dp(9), dp(4)
+            dp(4), dp(4), dp(8), dp(4)
         );
         header.setBackground(
-            background(0xFF131724, 22)
+            rounded(0xFF151827, 22)
         );
 
-        TextView bubble =
-            label("T", 19, Color.WHITE);
-
+        TextView bubble = text(
+            "T", 19, Color.WHITE
+        );
         bubble.setGravity(Gravity.CENTER);
         bubble.setTypeface(null, 1);
         bubble.setBackground(
-            background(0xFF7844ED, 30)
+            rounded(PURPLE, 30)
         );
 
         header.addView(
             bubble,
             new LinearLayout.LayoutParams(
-                dp(45), dp(45)
+                dp(44), dp(44)
             )
         );
 
-        headerText = label(
-            "  ━━  TOJI STRETCH",
+        // Puxador visivel mesmo minimizado.
+        TextView grip = text(
+            "  ━━", 16, 0xFFFF78C7
+        );
+        header.addView(grip);
+
+        name = text(
+            "  TOJI  |  STRETCH",
             12,
             Color.WHITE
         );
-        headerText.setTypeface(null, 1);
-        header.addView(headerText);
+        name.setTypeface(null, 1);
+        name.setVisibility(View.GONE);
+        header.addView(name);
 
         root.addView(header);
-        setupDrag(header);
+        attachDrag(header);
 
         scroll = new ScrollView(this);
         scroll.setFillViewport(false);
         scroll.setVerticalScrollBarEnabled(true);
         scroll.setBackground(
-            background(0xFF101726, 15)
+            rounded(DARK, 16)
         );
+        scroll.setVisibility(View.GONE);
 
-        controls = new LinearLayout(this);
-        controls.setOrientation(
-            LinearLayout.VERTICAL
-        );
-        controls.setPadding(
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(
             dp(12), dp(12), dp(12), dp(8)
         );
 
-        scroll.addView(controls);
+        scroll.addView(content);
         root.addView(scroll);
 
-        TextView heading = label(
-            "TOJI  •  RESOLUÇÃO",
+        TextView heading = text(
+            "RESOLUÇÃO",
             16,
             Color.WHITE
         );
         heading.setTypeface(null, 1);
         heading.setPadding(
-            0, 0, 0, dp(9)
+            0, 0, 0, dp(10)
         );
-        controls.addView(heading);
+        content.addView(heading);
 
-        LinearLayout inputs =
+        LinearLayout fields =
             new LinearLayout(this);
+        fields.setOrientation(
+            LinearLayout.HORIZONTAL
+        );
 
-        inputW = number("1080");
-        inputH = number("1920");
+        widthInput = numberField("1080");
+        heightInput = numberField("1920");
 
-        LinearLayout.LayoutParams il =
+        LinearLayout.LayoutParams first =
             new LinearLayout.LayoutParams(
-                0, dp(44), 1
+                0, dp(45), 1f
             );
-        il.rightMargin = dp(7);
+        first.rightMargin = dp(7);
 
-        inputs.addView(inputW, il);
-        inputs.addView(
-            inputH,
+        fields.addView(widthInput, first);
+        fields.addView(
+            heightInput,
             new LinearLayout.LayoutParams(
-                0, dp(44), 1
+                0, dp(45), 1f
             )
         );
 
-        controls.addView(inputs);
+        content.addView(fields);
 
-        TextView hint = label(
-            "LARGURA                              ALTURA",
+        TextView hint = text(
+            "LARGURA                         ALTURA",
             10,
-            0xFFAAB3C5
+            0xFFACB5C4
         );
         hint.setPadding(
-            0, dp(3), 0, dp(12)
+            0, dp(4), 0, dp(11)
         );
-        controls.addView(hint);
+        content.addView(hint);
 
-        // BARRINHA ROSA DE AJUSTE
-
-        barText = label(
-            "BARRINHA  •  ALTURA 1920",
+        // Barrinha de ajuste de altura.
+        barInfo = text(
+            "BARRINHA • ALTURA: 1920",
             12,
-            0xFFFF91CE
+            0xFFFF80C9
         );
-        controls.addView(barText);
+        content.addView(barInfo);
 
-        stretchBar = new SeekBar(this);
-        stretchBar.setMax(80);
-        stretchBar.setProgress(16);
+        heightBar = new SeekBar(this);
+        heightBar.setMax(80);
+        heightBar.setProgress(16);
 
-        stretchBar.setProgressTintList(
-            ColorStateList.valueOf(0xFFFF5ABA)
-        );
-        stretchBar.setThumbTintList(
-            ColorStateList.valueOf(0xFFFF5ABA)
-        );
-        controls.addView(stretchBar);
+        if (Build.VERSION.SDK_INT >= 21) {
+            heightBar.setProgressTintList(
+                ColorStateList.valueOf(
+                    0xFFFF65BB
+                )
+            );
+            heightBar.setThumbTintList(
+                ColorStateList.valueOf(
+                    0xFFFF65BB
+                )
+            );
+        }
 
-        TextView barHint = label(
-            "1600                                       3200",
-            11,
-            0xFFAAB3C5
-        );
-        barHint.setPadding(
-            0, 0, 0, dp(9)
-        );
-        controls.addView(barHint);
+        content.addView(heightBar);
 
-        stretchBar.setOnSeekBarChangeListener(
+        heightBar.setOnSeekBarChangeListener(
             new SeekBar.OnSeekBarChangeListener() {
 
                 @Override
                 public void onProgressChanged(
-                    SeekBar s,
-                    int progress,
-                    boolean fromUser
+                    SeekBar bar,
+                    int value,
+                    boolean user
                 ) {
-                    int h = 1600 + progress * 20;
+                    int height = 1600 + value * 20;
 
-                    barText.setText(
-                        "BARRINHA  •  ALTURA " + h
+                    barInfo.setText(
+                        "BARRINHA • ALTURA: " + height
                     );
 
-                    if (fromUser) {
-                        inputH.setText(
-                            String.valueOf(h)
+                    if (user) {
+                        heightInput.setText(
+                            String.valueOf(height)
                         );
                     }
                 }
 
                 @Override
                 public void onStartTrackingTouch(
-                    SeekBar s
+                    SeekBar bar
                 ) {}
 
                 @Override
                 public void onStopTrackingTouch(
-                    SeekBar s
+                    SeekBar bar
                 ) {}
             }
         );
 
-        // CONTROLES
-
-        button(
-            "APLICAR / TESTAR RESOLUÇÃO",
-            0xFF7742E7,
+        // Botoes principais.
+        addButton(
+            "TESTAR RESOLUÇÃO",
+            PURPLE,
             () -> {
                 try {
                     int w = Integer.parseInt(
-                        inputW.getText()
+                        widthInput.getText()
                             .toString().trim()
                     );
 
                     int h = Integer.parseInt(
-                        inputH.getText()
+                        heightInput.getText()
                             .toString().trim()
                     );
 
-                    apply(w, h);
+                    applyResolution(w, h);
 
                 } catch (NumberFormatException e) {
-                    showStatus(
-                        "Digite dois números válidos."
+                    setStatus(
+                        "Digite largura e altura válidas."
                     );
                 }
             }
         );
 
-        button(
+        addButton(
             "MANTER RESOLUÇÃO",
-            0xFF273347,
+            BUTTON,
             () -> {
-                if (busy || !testPending) {
-                    showStatus(
-                        "Nenhum teste aguardando confirmação."
+                if (busy || !testing) {
+                    setStatus(
+                        "Nenhum teste esperando confirmação."
                     );
                     return;
                 }
 
-                cancelTimer();
-                testPending = false;
+                testing = false;
+                cancelRestoreTimer();
 
-                showStatus(
-                    "Resolução mantida. Use Restaurar para voltar."
+                setStatus(
+                    "Mantida. Use RESTAURAR para voltar."
                 );
             }
         );
 
-        button(
+        addButton(
             "RESTAURAR TELA",
-            0xFF273347,
-            () -> restore(false)
+            BUTTON,
+            () -> restoreResolution(false)
         );
 
-        button(
+        addButton(
             "ABRIR BLOOD STRIKE",
-            0xFF273347,
-            () -> openBloodStrike()
+            BUTTON,
+            this::launchBloodStrike
         );
 
-        button(
+        addButton(
             "MINIMIZAR PARA BOLINHA",
-            0xFF273347,
+            BUTTON,
             () -> setExpanded(false)
         );
 
-        button(
+        addButton(
             "FECHAR TUDO E RESTAURAR",
-            0xFF572A39,
-            () -> restore(true)
+            0xFF71364B,
+            this::closeEverything
         );
 
-        status = label(
+        info = text(
             "Pronto para testar.",
             11,
-            0xFFB4A9FA
+            0xFFC2B5FF
         );
-
-        status.setPadding(
-            0, dp(5), 0, dp(3)
+        info.setPadding(
+            0, dp(7), 0, dp(3)
         );
-        controls.addView(status);
-
-        setExpanded(false);
+        content.addView(info);
     }
 
-    private void setupDrag(View handle) {
+    private void attachDrag(View view) {
         final int slop =
             ViewConfiguration.get(this)
                 .getScaledTouchSlop();
 
-        handle.setOnTouchListener(
+        view.setOnTouchListener(
             new View.OnTouchListener() {
                 float downX, downY;
-                int originX, originY;
-                boolean moving;
+                int startX, startY;
+                boolean moved;
 
                 @Override
                 public boolean onTouch(
-                    View v, MotionEvent event
+                    View v, MotionEvent e
                 ) {
-                    switch (
-                        event.getActionMasked()
-                    ) {
+                    switch (e.getActionMasked()) {
                         case MotionEvent.ACTION_DOWN:
-                            downX = event.getRawX();
-                            downY = event.getRawY();
+                            downX = e.getRawX();
+                            downY = e.getRawY();
 
-                            originX = params.x;
-                            originY = params.y;
+                            startX = params.x;
+                            startY = params.y;
 
-                            moving = false;
+                            moved = false;
                             return true;
 
                         case MotionEvent.ACTION_MOVE:
-                            float dx =
-                                event.getRawX() - downX;
-                            float dy =
-                                event.getRawY() - downY;
+                            int dx = Math.round(
+                                e.getRawX() - downX
+                            );
+                            int dy = Math.round(
+                                e.getRawY() - downY
+                            );
 
                             if (
                                 Math.abs(dx) > slop ||
                                 Math.abs(dy) > slop
                             ) {
-                                moving = true;
+                                moved = true;
                             }
 
-                            if (moving) {
+                            if (moved) {
                                 params.x = Math.max(
-                                    0,
-                                    originX + Math.round(dx)
+                                    0, startX + dx
                                 );
                                 params.y = Math.max(
-                                    0,
-                                    originY + Math.round(dy)
+                                    0, startY + dy
                                 );
-                                updateLayout();
+
+                                if (!expanded) {
+                                    bubbleX = params.x;
+                                    bubbleY = params.y;
+                                }
+
+                                updateOverlay();
                             }
                             return true;
 
                         case MotionEvent.ACTION_UP:
-                            if (!moving) {
+                            if (!moved) {
                                 setExpanded(!expanded);
                             }
                             return true;
 
                         case MotionEvent.ACTION_CANCEL:
                             return true;
+
+                        default:
+                            return false;
                     }
-                    return false;
                 }
             }
         );
     }
 
-    private void setFocusable(boolean enabled) {
+    private void setWindowFocusable(boolean yes) {
         if (params == null) return;
 
-        if (enabled) {
+        if (yes) {
             params.flags &=
                 ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         } else {
@@ -509,7 +523,7 @@ public class FloatingPanelService extends Service {
         params.flags |=
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
 
-        updateLayout();
+        updateOverlay();
     }
 
     private void hideKeyboard() {
@@ -517,7 +531,7 @@ public class FloatingPanelService extends Service {
 
         InputMethodManager imm =
             (InputMethodManager)
-                getSystemService(INPUT_METHOD_SERVICE);
+            getSystemService(INPUT_METHOD_SERVICE);
 
         if (imm != null) {
             imm.hideSoftInputFromWindow(
@@ -526,28 +540,22 @@ public class FloatingPanelService extends Service {
         }
 
         root.clearFocus();
-        setFocusable(false);
+        setWindowFocusable(false);
     }
 
     private void setExpanded(boolean open) {
-        if (
-            root == null ||
-            header == null ||
-            scroll == null
-        ) {
-            return;
-        }
+        if (root == null || scroll == null) return;
 
         hideKeyboard();
 
         if (open && !expanded) {
-            savedX = params.x;
-            savedY = params.y;
+            bubbleX = params.x;
+            bubbleY = params.y;
         }
 
         expanded = open;
 
-        headerText.setVisibility(
+        name.setVisibility(
             open ? View.VISIBLE : View.GONE
         );
         scroll.setVisibility(
@@ -563,114 +571,99 @@ public class FloatingPanelService extends Service {
                 getResources()
                     .getDisplayMetrics().heightPixels;
 
-            panelWidth = Math.max(
-                dp(190),
-                Math.min(
-                    dp(280),
-                    screenW - dp(24)
+            int width = Math.min(
+                dp(285),
+                Math.max(
+                    dp(180),
+                    screenW - dp(28)
                 )
             );
 
-            int scrollH = Math.max(
-                dp(110),
+            int height = Math.max(
+                dp(100),
                 Math.min(
-                    dp(340),
+                    dp(350),
                     screenH - dp(95)
                 )
             );
 
             scroll.setLayoutParams(
                 new LinearLayout.LayoutParams(
-                    panelWidth, scrollH
+                    width, height
                 )
             );
 
-            params.x = Math.min(
-                params.x,
-                Math.max(
-                    0,
-                    screenW - panelWidth - dp(8)
+            header.setLayoutParams(
+                new LinearLayout.LayoutParams(
+                    width, -2
                 )
             );
 
-            params.y = dp(8);
+            params.x = Math.max(
+                0,
+                Math.min(
+                    params.x,
+                    screenW - width - dp(4)
+                )
+            );
+
+            params.y = dp(5);
+
         } else {
-            params.x = savedX;
-            params.y = savedY;
+            header.setLayoutParams(
+                new LinearLayout.LayoutParams(
+                    -2, -2
+                )
+            );
+
+            params.x = bubbleX;
+            params.y = bubbleY;
         }
 
-        updateLayout();
+        updateOverlay();
     }
 
-    private void updateLayout() {
+    private void updateOverlay() {
         if (
-            wm != null &&
-            root != null &&
-            root.getWindowToken() != null
+            wm == null ||
+            root == null ||
+            root.getWindowToken() == null
         ) {
-            try {
-                wm.updateViewLayout(
-                    root, params
-                );
-            } catch (Exception ignored) {}
+            return;
         }
-    }
 
-    private void showStatus(String text) {
-        if (status != null) {
-            status.setText(text);
-        }
-    }
-
-    private void cancelTimer() {
-        if (timer != null) {
-            handler.removeCallbacks(timer);
-        }
-        timer = null;
-    }
-
-    private void openBloodStrike() {
         try {
-            Intent launch =
-                getPackageManager()
-                    .getLaunchIntentForPackage(
-                        "com.netease.newspike"
-                    );
-
-            if (launch == null) {
-                showStatus(
-                    "Blood Strike não encontrado no aparelho."
-                );
-                return;
-            }
-
-            launch.addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK
-            );
-
-            setExpanded(false);
-            startActivity(launch);
-
-        } catch (Exception e) {
-            showStatus(
-                "Não foi possível abrir Blood Strike."
-            );
+            wm.updateViewLayout(root, params);
+        } catch (Exception ignored) {
         }
     }
 
-    private void apply(int w, int h) {
-        if (busy || testPending) {
-            showStatus(
+    private void setStatus(String message) {
+        if (info != null) {
+            info.setText(message);
+        }
+    }
+
+    private void cancelRestoreTimer() {
+        if (restoreTimer != null) {
+            main.removeCallbacks(restoreTimer);
+            restoreTimer = null;
+        }
+    }
+
+    private void applyResolution(int width, int height) {
+        if (busy || testing) {
+            setStatus(
                 "Confirme ou restaure o teste anterior."
             );
             return;
         }
 
         if (
-            w < 600 || w > 3000 ||
-            h < 600 || h > 4000
+            width < 600 || width > 3000 ||
+            height < 600 || height > 4000
         ) {
-            showStatus(
+            setStatus(
                 "Resolução fora dos limites."
             );
             return;
@@ -678,119 +671,95 @@ public class FloatingPanelService extends Service {
 
         hideKeyboard();
         busy = true;
-
-        showStatus(
-            "Aplicando com Shizuku..."
-        );
+        setStatus("Aplicando via Shizuku...");
 
         new Thread(() -> {
-            ResolutionController.Result r =
+            ResolutionController.Result result =
                 ResolutionController.apply(
                     getApplicationContext(),
-                    w,
-                    h
+                    width,
+                    height
                 );
 
-            handler.post(() -> {
-                busy = false;
-
-                if (!r.ok) {
-                    showStatus(r.message);
-                    return;
+            if (destroyed) {
+                if (result.ok) {
+                    ResolutionController.restore(
+                        getApplicationContext()
+                    );
                 }
+                return;
+            }
 
-                testPending = true;
+            main.post(() -> {
+                if (destroyed) return;
 
-                showStatus(
+                busy = false;
+                setStatus(result.message);
+
+                if (!result.ok) return;
+
+                testing = true;
+                cancelRestoreTimer();
+
+                setStatus(
                     "Teste ativo: 15 s para manter ou restaurar."
                 );
 
-                cancelTimer();
-
-                timer = () -> {
-                    if (testPending) {
-                        restore(false);
+                restoreTimer = () -> {
+                    if (testing && !busy) {
+                        restoreResolution(false);
                     }
                 };
 
-                handler.postDelayed(
-                    timer, TEST_MS
+                main.postDelayed(
+                    restoreTimer,
+                    TEST_MS
                 );
             });
 
-        }, "Toji-Stretch-Apply").start();
+        }, "Toji-Apply").start();
     }
 
-    private void restore(boolean closeAfter) {
+    private void restoreResolution(boolean closeAll) {
         if (busy) {
-            showStatus(
-                "Aguarde o comando terminar."
-            );
+            setStatus("Aguarde o comando terminar.");
             return;
         }
 
-        busy = true;
-        testPending = false;
-
-        cancelTimer();
         hideKeyboard();
 
-        showStatus(
-            "Restaurando resolução..."
-        );
+        busy = true;
+        testing = false;
+
+        cancelRestoreTimer();
+        setStatus("Restaurando a resolução...");
 
         new Thread(() -> {
-            ResolutionController.Result r =
+            ResolutionController.Result result =
                 ResolutionController.restore(
                     getApplicationContext()
                 );
 
-            handler.post(() -> {
-                busy = false;
-                showStatus(r.message);
+            main.post(() -> {
+                if (destroyed) return;
 
-                if (closeAfter && r.ok) {
+                busy = false;
+                setStatus(result.message);
+
+                if (result.ok && closeAll) {
                     stopSelf();
                 }
             });
 
-        }, "Toji-Stretch-Restore").start();
+        }, "Toji-Restore").start();
     }
 
-    @Override
-    public void onConfigurationChanged(
-        Configuration config
-    ) {
-        super.onConfigurationChanged(config);
-        if (expanded) {
-            setExpanded(true);
+    private void closeEverything() {
+        if (busy) {
+            setStatus("Aguarde o comando terminar.");
+            return;
         }
-    }
 
-    @Override
-    public int onStartCommand(
-        Intent intent,
-        int flags,
-        int startId
-    ) {
-        return START_NOT_STICKY;
-    }
-
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
-
-    @Override
-    public void onDestroy() {
-        boolean restoreOnExit = testPending;
-        testPending = false;
-
-        cancelTimer();
-
-        if (restoreOnExit) {
-            new Thread(() -> {
-                ResolutionController.restore(
-                    getApplicationContext()
-                );
-            }, "T
+        boolean changedByToji =
+            getSharedPreferences(
+                Resolution
